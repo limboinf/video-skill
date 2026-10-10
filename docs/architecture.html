@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>video-audio 架构</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --card: #ffffff; --line: #e4e1d8; --fg: #1f1e1b; --dim: #6b6860;
+    --purple: #6f5fe0; --purple-bg: #efedfe; --teal: #13926c; --teal-bg: #e2f5ee;
+    --coral: #d4542a; --coral-bg: #fcebe4; --gray-bg: #f1efe8; --amber: #b36b00; --amber-bg: #fdf1dc;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { width: 1600px; background: var(--bg); color: var(--fg); font-family: "PingFang SC", -apple-system, sans-serif; padding: 48px 56px 56px; }
+  code, .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, monospace; }
+  h1 { font-size: 34px; font-weight: 700; }
+  h1 small { font-size: 20px; font-weight: 400; color: var(--dim); margin-left: 14px; }
+  .label { font-size: 15px; font-weight: 600; color: var(--dim); letter-spacing: .08em; margin: 30px 0 12px; }
+  .row { display: flex; gap: 16px; align-items: stretch; }
+  .box { background: var(--card); border: 1.5px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+  .inputs .box { flex: 1; display: flex; align-items: center; gap: 14px; font-size: 19px; }
+  .inputs .box b { font-size: 21px; }
+  .arrow-down { text-align: center; font-size: 26px; color: var(--dim); line-height: 1; margin: 8px 0 -6px; }
+
+  .layers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; align-items: stretch; }
+  .layer { position: relative; margin-right: 34px; display: flex; flex-direction: column; gap: 10px; }
+  .layer:last-child { margin-right: 0; }
+  .layer:not(:last-child)::after { content: "→"; position: absolute; right: -30px; top: 16px; font-size: 26px; color: var(--dim); }
+  .layer .head { display: flex; align-items: baseline; gap: 10px; }
+  .layer .head b { font-size: 24px; }
+  .layer .head span { font-size: 16px; color: var(--dim); }
+  .script { background: var(--card); border: 1.5px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .script code { font-size: 16px; font-weight: 600; }
+  .script p { font-size: 15px; color: var(--dim); margin-top: 4px; line-height: 1.45; }
+  .src { border-radius: 10px; padding: 10px 14px; font-size: 15px; line-height: 1.45; }
+  .src b { font-size: 16px; }
+  .heygen { background: var(--purple-bg); color: #3b2fa6; border: 1.5px solid #c9c2fb; }
+  .gb { background: var(--teal-bg); color: #0b5c44; border: 1.5px solid #a6e2cd; }
+  .code { background: var(--coral-bg); color: #8c3214; border: 1.5px solid #f3c2ad; }
+  .local { background: var(--gray-bg); color: #4a4843; border: 1.5px solid #dad7cd; }
+
+  .outputs .box { flex: 1; font-size: 17px; }
+  .outputs .box code { font-size: 17px; font-weight: 600; }
+  .outputs .box p { color: var(--dim); font-size: 15px; margin-top: 4px; }
+  .outputs .final { flex: 1.3; background: var(--amber-bg); border-color: #f3d39a; }
+
+  .deps { display: grid; grid-template-columns: 1fr 1.6fr 1fr; gap: 16px; }
+  .deps .box h3 { font-size: 18px; margin-bottom: 10px; }
+  .deps ul { list-style: none; display: flex; flex-direction: column; gap: 7px; }
+  .deps li { font-size: 15.5px; line-height: 1.4; }
+  .deps li code { font-size: 15px; font-weight: 600; }
+  .deps li span { color: var(--dim); }
+  .legend { display: flex; gap: 18px; margin-top: 22px; font-size: 15px; color: var(--dim); }
+  .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 4px; margin-right: 6px; vertical-align: -2px; }
+</style>
+</head>
+<body>
+  <h1>video-audio 架构<small>一个视频的声音 = 配音 → 配乐 → 音效 → 混音，每层从三种来源里挑</small></h1>
+
+  <div class="label">输入</div>
+  <div class="row inputs">
+    <div class="box"><b>文字稿</b><span class="mono" style="color:var(--dim)">script.txt</span><span style="color:var(--dim)">决定视频时长</span></div>
+    <div class="box"><b>画面节拍点</b><span style="color:var(--dim)">爆点 / 转场 / 揭晓各在第几秒，配乐和音效共用这张时间表</span></div>
+  </div>
+  <div class="arrow-down">↓</div>
+
+  <div class="label">四层处理</div>
+  <div class="layers">
+    <div class="layer">
+      <div class="head"><b>① 配音</b><span>先定时长</span></div>
+      <div class="script"><code>voiceover.py tts</code><p>复刻声音合成，默认引擎不可用时按 orca → starfish 兜底</p></div>
+      <div class="script"><code>voiceover.py segments</code><p>静音检测切出真实说话段，给字幕和音效排期</p></div>
+      <div class="src heygen"><b>HeyGen</b> 复刻声音 TTS</div>
+      <div class="src local"><b>whisper</b> 短语级时间（可选）</div>
+    </div>
+    <div class="layer">
+      <div class="head"><b>② 配乐</b><span>卡拍 or 定调</span></div>
+      <div class="script"><code>loops.py</code><p>扫描 Apple Loops，从时长反推 BPM，按套件筛选</p></div>
+      <div class="script"><code>arrange.py plan.json</code><p>按小节网格编排，混出成曲 + 分轨</p></div>
+      <div class="script"><code>beats.py · beat_timeline.py</code><p>现成曲子测拍点和高潮，让高潮对准关键时刻</p></div>
+      <div class="src gb"><b>GarageBand</b> 同套 loop 按小节编曲，高潮对齐画面</div>
+      <div class="src heygen"><b>HeyGen 曲库</b> 语义搜风格配乐、做 A/B 试听</div>
+    </div>
+    <div class="layer">
+      <div class="head"><b>③ 音效</b><span>开始 = 命中 − 峰值</span></div>
+      <div class="script"><code>heygen_audio.py</code><p>搜索 / 下载，带 peak_offset</p></div>
+      <div class="script"><code>synth.py</code><p>riser · sub · ding · whoosh · tick，固定种子可复现</p></div>
+      <div class="src heygen"><b>HeyGen 音效库</b> whoosh、撞击、打字、锁定</div>
+      <div class="src code"><b>代码合成</b> 库里没有的、品牌专属的</div>
+    </div>
+    <div class="layer">
+      <div class="head"><b>④ 混音</b><span>靠数据验证</span></div>
+      <div class="script"><code>arrange.py --bed</code><p>配乐出 -18 LUFS 底，给视频工程用</p></div>
+      <div class="script"><code>ffmpeg loudnorm</code><p>人声时配乐低约 10 LU；成片 -14 LUFS，峰值 ≤ -1.5 dBTP</p></div>
+      <div class="script"><code>audio_qa.py</code><p>交付前自检：音画等长、响度、峰值、断档、切点落拍</p></div>
+      <div class="src local"><b>ffmpeg</b> amix · loudnorm · ebur128 · volumedetect</div>
+      <div class="src local"><b>视频工具</b> HyperFrames 音量动画压人声</div>
+    </div>
+  </div>
+  <div class="arrow-down" style="margin-top:14px">↓</div>
+
+  <div class="label">输出</div>
+  <div class="row outputs">
+    <div class="box"><code>vo.wav</code> + 说话段 JSON<p>配音与字幕时间</p></div>
+    <div class="box"><code>bgm.wav</code> / <code>mix.m4a</code><p>配乐底 / 成曲</p></div>
+    <div class="box"><code>stem_*.m4a</code><p>每种来源一条分轨，方便对照试听</p></div>
+    <div class="box"><code>sfx/*</code> + 时间表<p>每个音效的开始时刻和音量</p></div>
+    <div class="box final"><code>final.mp4</code><p>视频工具合成后统一响度，-14 LUFS</p></div>
+  </div>
+
+  <div class="label">依赖</div>
+  <div class="deps">
+    <div class="box">
+      <h3>云服务</h3>
+      <ul>
+        <li><code>HeyGen API</code> <span>配音 TTS（含声音复刻）、曲库、音效库；需账号和额度</span></li>
+        <li><code>heygen</code> CLI <span>v0.10+，已 <code>auth login</code></span></li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>本地必需</h3>
+      <ul>
+        <li><code>macOS + GarageBand</code> <span>只读素材库 /Library/Audio/Apple Loops，用 afinfo 读时长</span></li>
+        <li><code>ffmpeg / ffprobe</code> <span>拼接、混音、响度、静音检测、转码</span></li>
+        <li><code>Python 3.9+ · numpy</code> <span>所有脚本；synth.py 用 numpy 合成波形</span></li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>可选</h3>
+      <ul>
+        <li><code>Node 18+ · hyperframes</code> <span>whisper 转写、视频合成</span></li>
+        <li><code>uisfx</code> <span>CC0 UI 音效包（npm）</span></li>
+        <li><code>HTTPS_PROXY</code> <span>访问 HeyGen 不稳时设置</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i style="background:#c9c2fb"></i>HeyGen</span>
+    <span><i style="background:#a6e2cd"></i>GarageBand</span>
+    <span><i style="background:#f3c2ad"></i>代码合成</span>
+    <span><i style="background:#dad7cd"></i>本地工具</span>
+  </div>
+</body>
+</html>

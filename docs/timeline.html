@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>hype-15s 编排</title>
+<style>
+  :root { --bg: #fbfaf7; --line: #e4e1d8; --fg: #1f1e1b; --dim: #6b6860; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { width: 1600px; background: var(--bg); color: var(--fg); font-family: "PingFang SC", -apple-system, sans-serif; padding: 44px 56px 48px; }
+  h1 { font-size: 30px; font-weight: 700; }
+  h1 small { font-size: 19px; font-weight: 400; color: var(--dim); margin-left: 12px; }
+  .grid { position: relative; margin-top: 56px; margin-left: 170px; width: 1260px; }
+  .sec, .lane { position: relative; height: 44px; margin-bottom: 10px; }
+  .lane .name { position: absolute; left: -170px; width: 160px; top: 0; height: 44px; display: flex; align-items: center; font-size: 17px; font-weight: 600; white-space: nowrap; }
+  .lane .name small { color: var(--dim); font-weight: 400; margin-left: 6px; font-size: 14px; }
+  .b { position: absolute; top: 0; height: 44px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14.5px; font-weight: 600; white-space: nowrap; overflow: hidden; }
+  .s { background: #f1efe8; border: 1.5px solid #dad7cd; color: #4a4843; }
+  .g { background: #e2f5ee; border: 1.5px solid #a6e2cd; color: #0b5c44; }
+  .h { background: #efedfe; border: 1.5px solid #c9c2fb; color: #3b2fa6; }
+  .c { background: #fcebe4; border: 1.5px solid #f3c2ad; color: #8c3214; }
+  .bar { position: absolute; top: -6px; bottom: -6px; width: 1px; background: var(--line); }
+  .hit { position: absolute; top: -8px; bottom: -14px; width: 0; border-left: 2px dashed #b36b00; }
+  .hit span { position: absolute; top: -26px; left: 8px; font-size: 14px; color: #b36b00; font-weight: 600; white-space: nowrap; }
+  .axis { position: relative; height: 26px; margin-top: 34px; }
+  .axis span { position: absolute; font-size: 13px; color: var(--dim); transform: translateX(-50%); }
+</style>
+</head>
+<body>
+  <h1>示例 hype-15s 的编排<small>128 BPM · 8 小节 = 15 秒 + 1.6 秒尾音 · 三种来源同一网格</small></h1>
+  <div class="grid" id="grid"></div>
+  <script>
+    // 1 秒 = 75.9px（16.6 秒铺满 1260px）
+    const PX = 1260 / 16.6, B = 1.875, x = (t) => t * PX;
+    const grid = document.getElementById("grid");
+    const add = (html) => grid.insertAdjacentHTML("beforeend", html);
+    const blk = (cls, t0, t1, txt) => `<div class="b ${cls}" style="left:${x(t0)}px;width:${x(t1) - x(t0) - 3}px">${txt}</div>`;
+    add(`<div class="sec">${blk("s", 0, 2*B, "引子")}${blk("s", 2*B, 6*B, "主段：进鼓")}${blk("s", 6*B, 7*B, "收")}${blk("s", 7*B, 8*B, "再爆")}${blk("s", 8*B, 16.6, "尾音")}</div>`);
+    const lanes = [
+      ["鼓 + 底鼓", "GarageBand", [["g", 2*B, 6*B, "Blueprint Beat · Big Room Kick"], ["g", 7*B, 8*B, "同上"]]],
+      ["贝斯旋律", "GarageBand", [["g", 2*B, 6*B, "Cascade Bass · Lead · Chords"], ["g", 7*B, 8*B, "同上"]]],
+      ["铺底", "GarageBand", [["g", 0, 2*B, "Pad · Piano Stabs"], ["g", 6*B, 7*B, "Pad · Pluck"]]],
+      ["军鼓滚奏", "GarageBand", [["g", B, 2*B, "Snare Roll"], ["g", 6*B, 7*B, "Snare Roll"]]],
+      ["冲击 / 上升", "HeyGen", [["h", 2*B - 0.455, 2*B + 1.2, "冲击"], ["h", 7*B - 2.52, 7*B, "上升"], ["h", 8*B - 0.08, 16.6, "低音轰"]]],
+      ["合成", "代码", [["c", 2*B - 2.8, 2*B, "噪声上升"], ["c", 2*B, 2*B + 0.9, "808"], ["c", 7*B, 7*B + 0.9, "808"], ["c", 8*B, 8*B + 1.3, "叮"]]],
+    ];
+    lanes.forEach(([name, src, blocks]) => add(`<div class="lane"><div class="name">${name}<small>${src}</small></div>${blocks.map((b) => blk(...b)).join("")}</div>`));
+    for (let i = 0; i <= 8; i++) add(`<div class="bar" style="left:${x(i * B)}px"></div>`);
+    add(`<div class="hit" style="left:${x(2*B)}px"><span>3.75s 爆点</span></div>`);
+    add(`<div class="hit" style="left:${x(7*B)}px"><span>13.125s 再爆</span></div>`);
+    add(`<div class="hit" style="left:${x(8*B)}px"><span>15s 收尾</span></div>`);
+    const axis = document.createElement("div");
+    axis.className = "axis";
+    axis.style.marginLeft = "170px";
+    for (let i = 0; i <= 8; i++) axis.insertAdjacentHTML("beforeend", `<span style="left:${x(i * B)}px">${(i * B).toFixed(2)}s</span>`);
+    document.body.appendChild(axis);
+  </script>
+</body>
+</html>

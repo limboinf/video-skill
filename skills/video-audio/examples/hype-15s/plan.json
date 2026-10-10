@@ -1,0 +1,28 @@
+{
+  "bpm": 128, "bars": 8, "tail": 1.6, "lufs": -14, "out": "out",
+  "clips": [
+    {"gb": "02 Electro House/Cascade Synth Pad", "bars": [0, 2], "vol": 0.7},
+    {"gb": "02 Electro House/Cascade Piano Stabs", "bars": [0, 2], "vol": 0.5},
+    {"gb": "02 Electro House/Big Snare Roll Topper", "bars": [1, 2], "vol": 0.6, "offset_bars": 1},
+    {"gb": "02 Electro House/Blueprint Beat 01", "bars": [2, 6], "vol": 1.0},
+    {"gb": "02 Electro House/Big Room Kick", "bars": [2, 6], "vol": 0.9},
+    {"gb": "02 Electro House/Cascade Synth Bass", "bars": [2, 6], "vol": 0.9},
+    {"gb": "02 Electro House/Cascade Synth Lead", "bars": [2, 6], "vol": 0.7},
+    {"gb": "02 Electro House/Cascade Chord Layers", "bars": [2, 6], "vol": 0.5},
+    {"gb": "02 Electro House/Cascade Synth Pad", "bars": [6, 7], "vol": 0.7},
+    {"gb": "02 Electro House/Cascade Synth Pluck Lead", "bars": [6, 7], "vol": 0.7},
+    {"gb": "02 Electro House/Honking Snare Roll Topper", "bars": [6, 7], "vol": 0.5, "offset_bars": 1},
+    {"gb": "02 Electro House/Blueprint Beat 01", "bars": [7, 8], "vol": 1.0},
+    {"gb": "02 Electro House/Big Room Kick", "bars": [7, 8], "vol": 0.9},
+    {"gb": "02 Electro House/Cascade Synth Bass", "bars": [7, 8], "vol": 0.9},
+    {"gb": "02 Electro House/Cascade Synth Lead", "bars": [7, 8], "vol": 0.7},
+    {"gb": "02 Electro House/Cascade Chord Layers", "bars": [7, 8], "vol": 0.5},
+    {"file": "sfx/heygen_impact.mp3", "hit_bar": 2, "peak": 0.455, "vol": 1.0, "stem": "heygen"},
+    {"file": "sfx/heygen_riser.mp3", "hit_bar": 7, "peak": 2.52, "vol": 0.6, "stem": "heygen"},
+    {"file": "sfx/heygen_boom.mp3", "hit_bar": 8, "peak": 0.08, "vol": 0.8, "stem": "heygen"},
+    {"file": "sfx/code_riser.wav", "hit_bar": 2, "peak": 2.8, "vol": 0.8, "stem": "code"},
+    {"file": "sfx/code_sub.wav", "hit_bar": 2, "vol": 0.8, "stem": "code"},
+    {"file": "sfx/code_sub.wav", "hit_bar": 7, "vol": 0.8, "stem": "code"},
+    {"file": "sfx/code_ding.wav", "hit_bar": 8, "vol": 0.5, "stem": "code"}
+  ]
+}
