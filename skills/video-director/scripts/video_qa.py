@@ -4,8 +4,11 @@
 
 用法：
   video_qa.py final.mp4 [--expect-size 1080x1920] [--expect-dur 30] [--out qa]
-                        [--allow-solid-bg] [--fixed-layout]
-  --allow-solid-bg  只给「纯色大底快切的动态排版」：不查画面空不空
+                        [--allow-solid-bg] [--fixed-layout] [--calm] [--strict-dur]
+  --expect-dur      期望时长：默认按「大约」查，-15%～+25% 都算过（配音自然念完比凑整重要）
+  --strict-dur      用户说了「严格 / 不超过 N 秒」时加：±3%
+  --allow-solid-bg  只给「纯色大底快切的动态排版」和导演单里声明了「留白构图」的镜头：不查画面空不空
+  --calm            只给运动人格是「电影慢镜 / 精密克制 / 流体有机」的片子：每秒变化放宽到 0.92（慢推、慢流动本来就像）
   --fixed-layout    只给「固定界面的网页录屏、分步说明书」：不查版式雷同和每秒变化
 输出（默认在成片旁边的 <名字>_qa/）：
   report.json   全部数字
@@ -31,6 +34,7 @@ except ImportError:
 EMPTY_BG_SHARE = 0.5     # 一帧里最多的那种颜色超过半屏，算「空底」；这类帧占比超过一半就报警
 LAYOUT_SIM = 0.45        # 相隔 3 秒以上的两帧边缘分布的平均相似度，超过说明版式重复、机位不变
 ADJACENT_SIM = 0.82      # 相邻两秒的平均相似度，超过说明像幻灯片翻页
+ADJACENT_SIM_CALM = 0.92 # --calm：慢人格的阈值。冻帧（死画面）照查，慢不等于不动
 MAX_FREEZE = 1.5         # 冻帧超过这么久算死画面（片尾定格除外）
 TAIL_GRACE = 2.0         # 最后 2 秒的冻帧当落版，不报
 
@@ -144,6 +148,8 @@ def main():
     ap.add_argument("--out")
     ap.add_argument("--allow-solid-bg", action="store_true")
     ap.add_argument("--fixed-layout", action="store_true")
+    ap.add_argument("--calm", action="store_true")
+    ap.add_argument("--strict-dur", action="store_true")
     a = ap.parse_args()
     src = Path(a.file)
     out = Path(a.out) if a.out else src.with_name(src.stem + "_qa")
@@ -158,7 +164,9 @@ def main():
         got = f"{info['width']}x{info['height']}"
         add("尺寸", got == a.expect_size, f"{got}，期望 {a.expect_size}")
     if a.expect_dur:
-        add("时长", abs(dur - a.expect_dur) <= a.expect_dur * 0.1, f"{dur:.2f}s，期望 {a.expect_dur:.2f}s ±10%")
+        lo, hi = (0.97, 1.03) if a.strict_dur else (0.85, 1.25)
+        add("时长", lo * a.expect_dur <= dur <= hi * a.expect_dur,
+            f"{dur:.2f}s，期望 {a.expect_dur:.2f}s（{lo * a.expect_dur:.1f}–{hi * a.expect_dur:.1f}s{'，严格' if a.strict_dur else '，大约'}）")
 
     blacks, freezes, scene = scan(a.file, dur)
     blacks = [(s, e) for s, e in blacks if s > 0.1 and e < dur - 0.5]          # 片头淡入、片尾淡出不算
@@ -181,8 +189,9 @@ def main():
         if not a.fixed_layout:
             add("版式雷同", cs["layout_sim"] is None or cs["layout_sim"] <= LAYOUT_SIM, f"相隔 3 秒以上的画面相似度 {cs['layout_sim']}"
                 + ("" if cs["layout_sim"] is None or cs["layout_sim"] <= LAYOUT_SIM else "：换景别、换角度、换构图"))
-            add("每秒变化", cs["adjacent_sim"] <= ADJACENT_SIM, f"相邻两秒相似度 {cs['adjacent_sim']}"
-                + ("" if cs["adjacent_sim"] <= ADJACENT_SIM else "：像幻灯片翻页，加相机运动、加镜头切换"))
+            adj = ADJACENT_SIM_CALM if a.calm else ADJACENT_SIM
+            add("每秒变化", cs["adjacent_sim"] <= adj, f"相邻两秒相似度 {cs['adjacent_sim']}（阈值 {adj}）"
+                + ("" if cs["adjacent_sim"] <= adj else "：像幻灯片翻页，加相机运动、加镜头切换"))
 
     imgs = {"联系表": sheet(a.file, out / "联系表.jpg", 2, 6, 320, dur),
             "手机尺寸": sheet(a.file, out / "手机尺寸.jpg", 1, 8, 360, dur)}

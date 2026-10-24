@@ -7,7 +7,7 @@
 ```bash
 mkdir my-film && cd my-film
 npm i playwright-core                                  # 只装库，用系统 Chrome，不下载浏览器
-cp <video-director>/templates/engine.html index.html
+cp <video-director>/templates/engine.html index.html   # 精密克制 / 电影慢镜 / 流体有机：改用 shader.html
 cp <video-director>/templates/lib.js .            # 工具库，engine.html 引用它
 node <video-director>/scripts/render.mjs index.html --out out --stills 0.5   # 先确认能出第一帧
 ```
@@ -24,7 +24,8 @@ node <video-director>/scripts/render.mjs index.html --out out --stills 0.5   # �
 - 分镜时间表和事件表放在文件最前面：`const SHOTS = [{id: 's1', a: 0, b: 3.2}, …]`，时刻从 `timeline.json` 抄，`seek` 里先找当前镜头再画。
 - 舞台固定成成片分辨率，所有坐标按它写，不要响应式。
 - 中文字体先用系统字体（macOS：PingFang SC、Songti SC、Kaiti SC）。要毛笔字、手写体，下载 OFL 开源字体放进工作目录本地加载，不依赖网络字体。
-- 用模板现成的函数：`seg()` 区间进度、`E.*` 缓动、`spring()` 弹簧、`beat / drop / pop / travel` 动作、`flash / shake / punch` 冲击、`ev()` 拍点、`cameraAt()` 相机、`splitWords / riseWords` 逐词升起。用法见 `motion.md`。
+- 用模板现成的函数：`seg()` 区间进度、`E.*` 缓动（`bezier()` 可以直接抄 CSS / AE 的曲线）、`spring()` 弹簧、`beat / drop / pop / travel` 动作、`flash / shake / punch` 冲击、`focusIn / defocus / wipe / drawOn / sheen / lightSweep / grain` 高级感原语、`ev()` 拍点、`cameraAt()` 相机、`splitWords / riseWords` 逐词升起。用法见 `motion.md`。
+- 着色器（`shader.html`）只读 `u_t`，不累加、不读上一帧；canvas 要 `preserveDrawingBuffer: true`，截图才拿得到画面。
 - 素材视频（`<video>`）也要按 t 定位：`video.currentTime = t - 起点`，等 `seeked` 事件再返回。
 
 ## 3. 渲染命令
@@ -39,7 +40,7 @@ node $R index.html --out out/第1遍 --layers 1                       # 分三�
 ```
 
 - 中断后重跑会跳过已渲好的帧；页面或同目录的 js/css 变了，旧帧自动作废。只改了子目录里的素材，加 `--force`。
-- `--sub 4`：每帧 4 个子帧混合，做动态模糊（渲染时间 ×4，只给快动作多的片子）。
+- `--sub 4 --shutter 180`：每帧 4 个子帧混合做运动模糊，快门 180° 是电影标准（曝光半帧）。精密克制、电影慢镜、流体有机的成片默认开；弹性卡通快动作多时用 `--shutter 360`（拖影更长）；机械硬切不开，或 `--shutter 90`。渲染时间 ×K，静帧自查阶段不用开。
 - 音频以视频时长为准，短了补静音。混音、响度在 video-audio 里做好再传进来。
 - 渲染日志末尾列出页面报错（异常、资源加载失败）。有报错先修，别交付。
 
@@ -51,6 +52,8 @@ node $R index.html --out out/第1遍 --layers 1                       # 分三�
 
 ## 5. 常见坑
 
+- **别和 `lib.js` 的全局名撞名**：`W`、`H`、`E`、`ROOT`、`LAYERS`、`EVENTS`、`GRID`、`GRAIN` 等已经声明过了，页面里再 `const LAYERS = …` 会直接语法报错。`render.mjs` 会立刻报出是哪个名字。
+- 想在无头浏览器里看页面的预览模式（比如检查概念预览页的样片能不能播）：启动参数加 `--disable-blink-features=AutomationControlled`，否则 `navigator.webdriver` 为 true，模板会当成渲染模式，不启动预览循环。
 - 缓动函数两端要精确返回 0 和 1（模板的 `ends()` 包过了），否则 `if (p > 0)` 这类判断会让元素提前冒出来。
 - 被隐藏的父元素下，子元素用 `visibility: inherit`，别写死 `visible`。
 - 每个图层写明 `z-index`。
@@ -59,7 +62,24 @@ node $R index.html --out out/第1遍 --layers 1                       # 分三�
 
 ## 6. 三维和素材
 
-- 真三维（沙盘、组装、物体转着看）：页面里用 Three.js，照样走 seek(t)，每帧按 t 设相机和物体，再 `renderer.render()`。
+- 真三维（沙盘、组装、物体转着看）：页面里用 Three.js，照样走 seek(t)。把 `three.module.js` 下载到工作目录本地加载（渲染不依赖网络），渲染器开 `preserveDrawingBuffer`：
+
+  ```html
+  <script type="module">
+  import * as THREE from './three.module.js';
+  const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gl'), antialias: true, preserveDrawingBuffer: true });
+  renderer.setSize(W, H, false);
+  const scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(35, W / H, 0.1, 100);
+  // …搭场景，材质、灯光在 seek 外面建好…
+  window.seek = async (t) => {
+    const a = lerp(-0.6, 0.4, E.silk(seg(t, 0.5, 4)));          // 绕轴移动，推完停住
+    cam.position.set(Math.sin(a) * 6, 1.6, Math.cos(a) * 6); cam.lookAt(0, 0.8, 0);
+    renderer.render(scene, cam);
+  };
+  await document.fonts.ready; await window.seek(0); window.ready = true;
+  </script>
+  ```
+  不要用 `THREE.Clock`、`AnimationMixer.update(delta)` 这类按真实时间累加的东西；动画混合器要用就 `mixer.setTime(t)`。
 - 点名 Blender：bpy 脚本渲图片序列，再用 ffmpeg 合成，自检照样跑 `video_qa.py`。
 - 写实照片、真实人物：先生图或找授权素材，再用代码剪辑包装（推拉、视差、叠层）。生图时每张按分镜写好景别和角度，别全是同一个机位的中景。
 - 产品宣传片：读项目代码找卖点，把产品真的跑起来截真界面，不画假界面。

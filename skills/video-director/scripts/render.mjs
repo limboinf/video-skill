@@ -4,7 +4,7 @@
 //
 // 用法：node render.mjs <page.html> --out <目录> [--w 1920 --h 1080 --fps 30 --dur 秒]
 //         [--stills 1,5.5,9] [--from 0 --to 60] [--workers 4] [--sub 1] [--audio mix.wav]
-//         [--name video.mp4] [--layers 1,2] [--force]
+//         [--name video.mp4] [--layers 1,2] [--shutter 180] [--force]
 // 页面约定：
 //   window.seek = async (t) => {...}   t 单位秒，画面只由 t 决定（不许用定时器、CSS 过渡/动画）
 //   window.ready = true                字体、图片等资源加载完后再设
@@ -24,19 +24,20 @@ import { spawnSync } from 'node:child_process';
 const FF = process.env.FFMPEG || 'ffmpeg';
 const USAGE = `用法：node render.mjs <page.html> --out <目录> [--w 1920 --h 1080 --fps 30 --dur 秒]
         [--stills 1,5.5,9] [--from 0 --to 60] [--workers 4] [--sub 1] [--audio mix.wav]
-        [--name video.mp4] [--layers 1,2] [--force]
+        [--name video.mp4] [--layers 1,2] [--shutter 180] [--force]
   --stills  只渲这几个时刻的静帧（秒，逗号分隔），拼成 <out>/stills/sheet.jpg，不出视频
   --from/--to  只渲这段时间（秒）    --workers  并行页面数    --sub K  每帧 K 个子帧做动态模糊
+  --shutter 快门角度（度，默认 180 = 电影标准，曝光半帧；360 拖影最长；90 偏硬朗）。只在 --sub > 1 时起作用
   --audio   把音频合进成片（以视频时长为准，音频短了补静音）    --force  已有的帧也重渲
   --layers  只画这几层（分步实现用：页面按 ?layers=1,2 决定画哪几层；每一遍出到自己的 --out 目录）`;
-const VALUE_KEYS = ['out', 'w', 'h', 'fps', 'dur', 'stills', 'from', 'to', 'workers', 'sub', 'audio', 'name', 'layers'];
+const VALUE_KEYS = ['out', 'w', 'h', 'fps', 'dur', 'stills', 'from', 'to', 'workers', 'sub', 'audio', 'name', 'layers', 'shutter'];
 
 function die(msg) { console.error('[错误] ' + msg); process.exit(1); }
 const fmt = (s) => (s < 90 ? `${s.toFixed(1)} 秒` : `${Math.floor(s / 60)} 分 ${Math.round(s % 60)} 秒`);
 const pad = (n, k) => String(n).padStart(k, '0');
 
 function parseArgs(argv) {
-  const o = { w: 1920, h: 1080, fps: 30, sub: 1, name: 'video.mp4', force: false,
+  const o = { w: 1920, h: 1080, fps: 30, sub: 1, shutter: 180, name: 'video.mp4', force: false,
     workers: Math.max(1, Math.min(4, Math.floor(os.cpus().length / 2))) };
   const pos = [];
   for (let i = 0; i < argv.length; i++) {
@@ -55,6 +56,8 @@ function parseArgs(argv) {
     o[k] = Math.round(Number(o[k]));
     if (!(o[k] >= 1)) die(`--${k} 要是正整数`);
   }
+  o.shutter = Number(o.shutter);
+  if (!(o.shutter > 0 && o.shutter <= 360)) die('--shutter 要是 (0, 360] 之间的角度');
   for (const k of ['dur', 'from', 'to']) {
     if (o[k] === undefined) continue;
     o[k] = Number(o[k]);
@@ -142,12 +145,18 @@ async function openPage(browser, url, o, errs) {
     if (!/favicon/.test(loc || '')) errs.add('console.error：' + m.text() + (loc ? `（${loc}）` : ''));
   });
   page.on('requestfailed', (r) => errs.add('资源加载失败：' + r.url()));
+  // 就绪前页面一报错就立刻失败：脚本语法错（比如和 lib.js 的全局变量重名）时 ready 永远不会来，别白等 120 秒
+  let onErr;
+  const crashed = new Promise((_, bad) => { onErr = (e) => bad(new Error('页面脚本出错，没能就绪：' + String(e && e.message || e).split('\n')[0])); });
+  crashed.catch(() => {});                                   // 报错可能发生在 goto 期间，先挂上处理，race 里照样拿得到
+  page.on('pageerror', onErr);
   await page.goto(url, { waitUntil: 'load', timeout: 60000 });
   try {
-    await page.waitForFunction(() => window.ready === true && typeof window.seek === 'function', null, { timeout: 120000 });
-  } catch {
+    await Promise.race([crashed, page.waitForFunction(() => window.ready === true && typeof window.seek === 'function', null, { timeout: 120000 })]);
+  } catch (e) {
+    if (/页面脚本出错/.test(e.message)) throw e;
     throw new Error('等了 120 秒页面还没就绪：确认页面定义了 window.seek，并在资源加载完后设置 window.ready = true');
-  }
+  } finally { page.off('pageerror', onErr); }
   await page.evaluate(() => document.fonts && document.fonts.ready.then(() => 0));
   const info = await page.evaluate(() => {
     const el = document.querySelector('#stage'), d = Number(window.DURATION);
@@ -261,7 +270,7 @@ async function main() {
       const frameDir = path.join(out, K === 1 ? 'frames.noindex' : `frames_sub${K}.noindex`);  // .noindex：macOS 的 Spotlight 不去索引成千上万张帧
       fs.mkdirSync(frameDir, { recursive: true });
       const metaFile = path.join(frameDir, 'meta.json');
-      const meta = { w: o.w, h: o.h, fps: o.fps, sub: K, page: path.basename(pagePath), hash: pageHash(pagePath), layers: o.layers || null };
+      const meta = { w: o.w, h: o.h, fps: o.fps, sub: K, shutter: K > 1 ? o.shutter : null, page: path.basename(pagePath), hash: pageHash(pagePath), layers: o.layers || null };
       let force = o.force;
       try {
         const old = JSON.parse(fs.readFileSync(metaFile, 'utf8'));
@@ -270,13 +279,14 @@ async function main() {
       fs.writeFileSync(metaFile, JSON.stringify(meta));
       const jobs = [];
       for (let i = i0; i < i1; i++) for (let j = 0; j < K; j++) {
-        const t = K === 1 ? i / o.fps : Math.max(0, i / o.fps + (j - (K - 1) / 2) / (o.fps * K));
+        // 子帧均匀铺在以帧时刻为中心的曝光窗口里：窗口 = 快门角度 / 360 帧
+        const t = K === 1 ? i / o.fps : Math.max(0, i / o.fps + ((j + 0.5) / K - 0.5) * (o.shutter / 360) / o.fps);
         const file = K === 1 ? path.join(frameDir, `f_${pad(i + 1, 6)}.jpg`) : path.join(frameDir, `s_${pad(i * K + j + 1, 7)}.jpg`);
         if (force || !fs.existsSync(file) || fs.statSync(file).size === 0) jobs.push({ t, file });
       }
       const total = (i1 - i0) * K;
       console.log(`规格：${o.w}×${o.h} @${o.fps}fps，渲 ${from.toFixed(2)}–${to.toFixed(2)} 秒共 ${i1 - i0} 帧` +
-        `${K > 1 ? `（每帧 ${K} 个子帧做动态模糊）` : ''}，${Math.min(o.workers, Math.max(1, jobs.length))} 个页面并行`);
+        `${K > 1 ? `（每帧 ${K} 个子帧、${o.shutter}° 快门做动态模糊）` : ''}，${Math.min(o.workers, Math.max(1, jobs.length))} 个页面并行`);
       if (jobs.length < total) console.log(`[提示] 跳过已存在的 ${total - jobs.length} 张截图（要全部重渲加 --force）`);
       const t0 = Date.now();
       await runJobs(browser, url, o, jobs, errs, '渲染');

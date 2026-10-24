@@ -167,7 +167,7 @@ function startPreview() {
       playing = false; cur = clamp(cur + (e.code === 'ArrowRight' ? 1 : -1) / 30, 0, DURATION); window.seek(cur);
     }
   });
-  const loop = (now) => { if (playing) { cur = (cur + (now - last) / 1000) % DURATION; window.seek(cur); } last = now; requestAnimationFrame(loop); };
+  const loop = (now) => { if (playing) { cur = (cur + Math.max(0, now - last) / 1000) % DURATION; window.seek(cur); } last = now; requestAnimationFrame(loop); };
   requestAnimationFrame(loop);
 }
 document.fonts.ready.then(async () => { await window.seek(0); window.ready = true; if (!RENDER) startPreview(); });

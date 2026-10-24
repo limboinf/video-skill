@@ -30,7 +30,8 @@ python3 scripts/voiceover.py tts script.txt -o vo.wav --source gemini --voice Pu
 - `tts` 会按 orca → starfish → elevenlabs 依次尝试。复刻声音不指定引擎时，常见报错是「saved voice engine is not available」。
 - 实测同一段 130 字中文：orca 31.0s，starfish 35.3s。orca 语速更接近日常口播，优先用它。
 - 停顿用 `<break time="0.3s"/>`，**必须写秒**，写毫秒 HeyGen 会报错。每句之间放 0.3s，句子之间的边界听起来更清楚，静音切段也更准。
-- 中文口播大约每秒 4.2–4.5 字。30 秒视频的稿子控制在 130 字左右。
+- 写稿按**每秒 3.8 字**估（含句间停顿）：30 秒的稿子写 115 字左右。播音腔能到每秒 4.2–4.5 字，复刻声音偏慢，实测 130 字念了 34.6 秒。
+- **时长不用卡死**：用户说「30 秒」默认是大约，配音落在 -15%～+25% 直接用。超出才删稿重配；不用 `atempo` 给配音提速超过 5%，提速 12% 听着明显赶。用户说「严格 / 不超过 N 秒」时才按上限删稿。
 - 每句不超过 20 个字，一句就是一条字幕。句间 0.25–0.4s，段落之间 0.6–0.8s。
 - 稿子里的英文专名（项目名、命令）会被中文模型读得别扭。能换中文说法就换；必须读英文时，单独听一遍这一句。
 
@@ -49,7 +50,11 @@ python3 scripts/voiceover.py align script.txt vo.wav -o cues.json
 3. 动态规划在段落之间的停顿里挑一组最贴近的位置当边界，所以每条字幕的起止都落在真实的换气上。
 4. 同一句里相邻的分句，合起来不超过一行（16 个汉字宽）就并成一条，中间用空格隔开。
 
-输出 `[{text, start, end}]`，字幕显示到下一条开始。停顿比分句还少时（引擎没停顿），它会退回到按整句对齐；整句都对不上就报错，在稿子里每句之间加 `<break time="0.3s"/>` 重新合成。
+输出 `[{text, start, end}]`，字幕显示到下一条开始。
+
+整句那一层还会看停顿有多长：稿子里写了 `<break>` 的地方停得长，句中逗号的换气短，所以长停顿优先当句子边界。数字按一位一个音估时长（2025 念四个音），全大写缩写按字母念（SQL、AI）。旧版只按字数比例挑边界，「2025 年，」后面的逗号换气抢走了句号，整句错位 1 秒。
+
+稿子里数字、英文多的时候，用 whisper 抽查 1–2 句的起止（`whisper vo.wav --model small --language zh --word_timestamps True --output_format json`），对不上再手改 `cues.json`。停顿比分句还少时（引擎没停顿），它会退回到按整句对齐；整句都对不上就报错，在稿子里每句之间加 `<break time="0.3s"/>` 重新合成。
 
 实测 30 秒介绍片：whisper（small）把整段识别成一个片段，还把「HeyGen」听成「黑镇」、「古筝」听成「古针」；`align` 出 11 条字幕，起止都落在换气处。whisper 只在要做逐字高亮这类比分句还细的时间时才用，作为可选项：`whisper vo.wav --model small --language zh --word_timestamps True --output_format json`。
 

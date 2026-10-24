@@ -5,7 +5,7 @@
 | 对象 | 目标 |
 |---|---|
 | 配乐素材（交给视频工程前） | -18 LUFS（`arrange.py --bed` 直接输出） |
-| 人声说话时的配乐 | 比人声低 15 dB（至少 12 dB；最响的那一秒至少 8 dB）。配乐越密（鼓、贝斯多）取越低。`mix.py` 的 `under_voice_db` |
+| 人声说话时的配乐 | 比人声低 18 dB（至少 12 dB；最响的那一秒至少 8 dB）。配乐越密（鼓、贝斯多）取越低。`mix.py` 的 `under_voice_db` |
 | 没人说话时（开头、句间长停顿、结尾） | 比人声低约 4 dB，让音乐抬起来。`mix.py` 的 `gap_db` |
 | 转场、关键帧音效 | 峰值在人声下面，不抢字：`gain_db` 一般 -10 到 -4 |
 | 成片 | -14 LUFS，真峰值 ≤ -1.5 dBTP（抖音、视频号、YouTube 都会按这个附近标准化） |
@@ -19,7 +19,7 @@
 ```json
 { "dur": 30.5, "voice": "vo.wav",
   "music": {"file": "music/a.mp3", "start": 5.38, "fade_in": 0.5, "fade_out": 1.5},
-  "under_voice_db": 15, "gap_db": 4,
+  "under_voice_db": 18, "gap_db": 4,
   "sfx": [{"file": "sfx/whoosh.mp3", "hit": 4.11, "peak": 0.3, "gain_db": -6}],
   "lufs": -14, "out": "mix.wav", "stems": "stems" }
 ```

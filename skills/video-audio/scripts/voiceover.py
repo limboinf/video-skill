@@ -153,10 +153,20 @@ def width(text):
     return han_count(text) + 0.5 * (len(text.replace(" ", "")) - han_count(text))
 
 
+def word_weight(w):
+    """一个英文词或数字念多久（按汉字计）：数字一位一个音（2025 念「二零二五」）；
+    全大写的短缩写逐个字母念（SQL、AI）；普通单词按字母数 × 0.35，至少 1。"""
+    if w.isdigit():
+        return len(w)
+    if w.isupper() and len(w) <= 4:
+        return len(w)
+    return max(1.0, 0.35 * len(w))
+
+
 def weight(text):
-    """念这段要多久的相对权重：汉字 1，英文单词按字母数 × 0.35，标点不算。"""
-    words = re.findall(r"[A-Za-z0-9]+", text)
-    return han_count(text) + sum(0.35 * len(w) for w in words) or 1
+    """念这段要多久的相对权重：汉字 1，英文和数字见 word_weight，标点不算。"""
+    words = re.findall(r"[A-Za-z]+|[0-9]+", text)
+    return han_count(text) + sum(word_weight(w) for w in words) or 1
 
 
 def split_units(script, level):
@@ -182,7 +192,7 @@ def merge_lines_keep(cues):
     return out
 
 
-def match_gaps(spans, units):
+def match_gaps(spans, units, gap_w=0.0):
     """把 N-1 个分句边界对到 M-1 个停顿上：按念的时长比例算每个边界的期望位置（只算说话时间，不算静音），
     动态规划选单调递增、总偏差最小的一组停顿。返回 (选中的停顿, 平均偏差秒数)；停顿不够用返回 None。"""
     n, m = len(units), len(spans)
@@ -192,20 +202,25 @@ def match_gaps(spans, units):
         return None
     talk = [b - a for a, b in spans]
     gap_pos = [sum(talk[: j + 1]) for j in range(m - 1)]      # 第 j 个停顿前已经说了多久
+    gap_len = [spans[j + 1][0] - spans[j][1] for j in range(m - 1)]
+    longest = max(gap_len)
+    # gap_w > 0：停顿越长越像边界。只在整句那一层用——那里每个边界稿子里都写了 <break>，长短可信；
+    # 句内逗号处的换气长短是随机的，用了反而把边界挑错（实测两种情况各错过一次）
+    pick = lambda j, k: abs(gap_pos[j] - want[k]) + gap_w * (longest - gap_len[j])
     total, ws = sum(talk), [weight(u) for u, _ in units]
     want = [total * sum(ws[: k + 1]) / sum(ws) for k in range(n - 1)]
     INF = float("inf")
     cost = [[INF] * (m - 1) for _ in range(n - 1)]
     back = [[-1] * (m - 1) for _ in range(n - 1)]
     for j in range(m - 1):
-        cost[0][j] = abs(gap_pos[j] - want[0])
+        cost[0][j] = pick(j, 0)
     for k in range(1, n - 1):
         best, arg = INF, -1
         for j in range(m - 1):
             if j > 0 and cost[k - 1][j - 1] < best:
                 best, arg = cost[k - 1][j - 1], j - 1
             if best < INF:
-                cost[k][j], back[k][j] = best + abs(gap_pos[j] - want[k]), arg
+                cost[k][j], back[k][j] = best + pick(j, k), arg
     j = min(range(m - 1), key=lambda x: cost[n - 2][x])
     err = cost[n - 2][j] / (n - 1)
     picked = []
@@ -215,12 +230,13 @@ def match_gaps(spans, units):
     return picked[::-1], err
 
 
+GAP_W = 1.0                        # 整句层停顿长度的分量：短一秒的停顿，相当于位置偏差 1 秒
 SILENCE_STEPS = (0.2, 0.15, 0.1)   # 逗号处停得短的引擎（比如 orca）切不出来时，逐级放宽最短静音
 
 
-def place(spans, units):
+def place(spans, units, gap_w=0.0):
     """把 units 对到 spans 上，返回 ([每个 unit 的 (start, end)], 平均偏差秒数)；停顿不够返回 None。"""
-    r = match_gaps(spans, units)
+    r = match_gaps(spans, units, gap_w)
     if r is None:
         return None
     gaps, err = r
@@ -252,7 +268,7 @@ def align(script, wav):
     """两层对齐：先按 <break> 的长停顿对整句（几乎不会错），再在每句的时间范围里对分句。"""
     sents = split_units(script, "sentence")
     coarse = segments(wav, min_silence=SILENCE_STEPS[0])
-    r = place(coarse, sents)
+    r = place(coarse, sents, GAP_W)
     sent_t = r[0] if r else None
     if sent_t is None:
         sys.exit(f"说话段落只有 {len(coarse)} 段，比句子还少：在稿子里每句之间加 <break time=\"0.3s\"/> 重新合成，或者逐句合成")

@@ -169,6 +169,66 @@ const cssCamera = (el, c) => { el.style.transform = `translate(${W / 2}px,${H / 
 const ctxCamera = (ctx, c) => { ctx.setTransform(1, 0, 0, 1, W / 2, H / 2); ctx.rotate(((c.r || 0) * Math.PI) / 180); ctx.scale(c.s, c.s); ctx.translate(-c.x, -c.y); };
 const fade = (el, p, dy = 14) => { el.style.opacity = p; el.style.transform = `translateY(${(1 - p) * dy}px)`; };
 
+// ===== 高级感原语：精密克制、电影慢镜、流体有机这几种运动人格用（见 references/motion.md 第 0 节） =====
+// 上面那套 beat / drop / squash / flash 是「弹性卡通」的词汇；高级感靠的是：无过冲的长减速、虚焦、遮罩、光、颗粒和运动模糊（render.mjs --sub）。
+// bezier：和 CSS cubic-bezier() 同一条曲线，设计稿、AE 里的缓动直接抄过来。牛顿迭代 + 二分兜底，两端精确 0 和 1
+function bezier(x1, y1, x2, y2) {
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx, cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  const X = (u) => ((ax * u + bx) * u + cx) * u, dX = (u) => (3 * ax * u + 2 * bx) * u + cx, Y = (u) => ((ay * u + by) * u + cy) * u;
+  return ends((x) => {
+    let u = x;
+    for (let i = 0; i < 8; i++) { const e = X(u) - x, d = dX(u); if (Math.abs(e) < 1e-6) return Y(u); if (Math.abs(d) < 1e-6) break; u -= e / d; }
+    let a = 0, b = 1; u = x;
+    for (let i = 0; i < 40; i++) { const e = X(u) - x; if (Math.abs(e) < 1e-6) break; if (e > 0) b = u; else a = u; u = (a + b) / 2; }
+    return Y(u);
+  });
+}
+Object.assign(E, {
+  glide: bezier(0.16, 1, 0.3, 1),   // 长减速、零过冲：精密克制的入场和走位（0.6–1.2 秒），前 20% 时间走完七成
+  silk: bezier(0.65, 0, 0.35, 1),   // 两头柔：镜头推拉、拉焦、形变、流体（这类「状态变化」才用对称曲线）
+  exit: bezier(0.7, 0, 0.84, 0),    // 加速离场：东西走的时候越走越快、不回头。退场比进场快 30%–50%
+});
+// 景深：层的深度 z（0 = 焦平面，正负是前后），焦点 focus 随时间挪动就是「拉焦」。返回模糊像素，给 CSS filter: blur() 或 ctx.filter
+// 用法：focus = lerp(0, 1, E.silk(seg(t, 1, 1.8)))；bg.style.filter = `blur(${defocus(1, focus)}px)`——焦点从背景拉到前景，观众视线跟着走
+const defocus = (z, focus = 0, k = 14, max = 28) => Math.min(max, Math.abs(z - focus) * k);
+// 虚焦显影：从模糊、略大、透明 → 清晰到位。替代「放大回弹砸进来」的高级入场；p 用 E.glide 算
+function focusIn(el, p, { blur = 18, scale = 1.06, dy = 0 } = {}) {
+  el.style.opacity = clamp(p * 1.6);
+  el.style.filter = p >= 1 ? 'none' : `blur(${(1 - p) * blur}px)`;
+  el.style.transform = `translateY(${(1 - p) * dy}px) scale(${lerp(scale, 1, p)})`;
+}
+// 遮罩擦出：内容本身不动，从一条边被擦出来（比淡入干净）。dir：'up' 从下往上 | 'down' | 'left' 从右往左 | 'right'；返回 clip-path 字符串
+const wipe = (p, dir = 'up') => { const q = ((1 - clamp(p)) * 100).toFixed(3) + '%';
+  return { up: `inset(${q} 0 0 0)`, down: `inset(0 0 ${q} 0)`, left: `inset(0 0 0 ${q})`, right: `inset(0 ${q} 0 0)` }[dir]; };
+// 描线：SVG <path> 按进度一笔画出来（路线、签名、图表曲线、Logo 轮廓）。总长第一次调用时量好缓存
+function drawOn(path, p) { const L = (path._len ??= path.getTotalLength()); path.style.strokeDasharray = L; path.style.strokeDashoffset = L * (1 - clamp(p)); }
+// 光扫（Canvas）：一道柔光斜着扫过 (x,y,w,h)，只亮这块区域里画过的东西所在的画布；p 0→1 从左扫到右，0.6–1.0 秒，全片 1–2 次
+function lightSweep(ctx, p, x, y, w, h, { angle = 20, width = 0.16, alpha = 0.4, color = '255,255,255' } = {}) {
+  if (p <= 0 || p >= 1) return;
+  const bw = width * w, diag = Math.hypot(w, h);
+  ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip(); ctx.globalCompositeOperation = 'lighter';
+  ctx.translate(x + lerp(-width, 1 + width, p) * w, y + h / 2); ctx.rotate((angle * Math.PI) / 180);
+  const g = ctx.createLinearGradient(-bw, 0, bw, 0);
+  g.addColorStop(0, `rgba(${color},0)`); g.addColorStop(0.5, `rgba(${color},${alpha})`); g.addColorStop(1, `rgba(${color},0)`);
+  ctx.fillStyle = g; ctx.fillRect(-bw, -diag, bw * 2, diag * 2); ctx.restore();
+}
+// 光扫（DOM 文字）：元素要先设 background: linear-gradient(100deg, 字色 42%, 高光色 50%, 字色 58%) 0 0 / 300% 100%;
+// -webkit-background-clip: text; color: transparent。p 0→1 让高光从左走到右
+const sheen = (el, p) => { el.style.backgroundPosition = `${lerp(100, 0, clamp(p))}% 0`; };
+// 胶片颗粒：预生成 6 张噪声小图，按帧序号轮换铺满——每帧颗粒都在变，但同一帧永远一样。
+// 画在一张单独的 canvas 上，给那张 canvas 写 CSS mix-blend-mode: overlay；amount 0.05–0.15，缩到 360 宽还要看得出
+let GRAIN = null;
+function grain(ctx, t, amount = 0.1, fps = 30) {
+  GRAIN ??= Array.from({ length: 6 }, (_, k) => {
+    const c = document.createElement('canvas'); c.width = c.height = 256;
+    const g = c.getContext('2d'), img = g.createImageData(256, 256), r = mulberry32(911 + k);
+    for (let i = 0; i < img.data.length; i += 4) { img.data[i] = img.data[i + 1] = img.data[i + 2] = r() * 255; img.data[i + 3] = 255; }
+    g.putImageData(img, 0, 0); return c;
+  });
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H); ctx.globalAlpha = amount;
+  ctx.fillStyle = ctx.createPattern(GRAIN[((Math.floor(t * fps) % GRAIN.length) + GRAIN.length) % GRAIN.length], 'repeat'); ctx.fillRect(0, 0, W, H); ctx.restore();
+}
+
 
 /* =================== 通用件（和风格无关，每条片子都用得上） =================== */
 // 图片按「铺满裁切」画进一个框（像 CSS object-fit: cover），filter 可做调色：'sepia(.8) saturate(.6)'

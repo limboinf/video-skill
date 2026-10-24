@@ -10,7 +10,7 @@ mix.json：
   "voice": "vo.wav",                             配音（可省略：纯配乐片）
   "music": {"file": "music/a.mp3", "start": 5.38, "fade_in": 0.5, "fade_out": 1.5},
                                                  start = 从曲子第几秒开始放（beat_timeline.py 算出来的 song_start）
-  "under_voice_db": 15,                          有人说话时，配乐比人声低多少 dB（默认 15，至少 12）
+  "under_voice_db": 18,                          有人说话时，配乐比人声低多少 dB（默认 18，至少 12；15 时最响那一秒常不达标）
   "gap_db": 4,                                   没人说话时，配乐比人声低多少 dB（默认 4）
   "sfx": [{"file": "sfx/whoosh.mp3", "hit": 4.11, "peak": 0.3, "gain_db": -4}],
                                                  hit = 画面上命中的时刻，peak = 文件里最响的位置（heygen_audio.py 会打印）
@@ -98,7 +98,7 @@ def main():
         for a, b in segments(str(base / plan["voice"])):
             speech[int(a * SR):int(b * SR)] = True
 
-    under, gap = max(MIN_UNDER_DB, plan.get("under_voice_db", 15)), plan.get("gap_db", 4)
+    under, gap = max(MIN_UNDER_DB, plan.get("under_voice_db", 18)), plan.get("gap_db", 4)
     if plan.get("music"):
         m = plan["music"]
         x = load(base / m["file"])[int(m.get("start", 0) * SR):][:n]

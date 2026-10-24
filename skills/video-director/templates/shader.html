@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>shader · seek(t) 着色器模板</title>
+<!--
+  着色器模板：WebGL2 片元着色器当底（流体、光场、材质、生成纹理）+ DOM 文字层 + 颗粒层。照样只由 t 算画面。
+  和 engine.html 的区别：engine 演示「弹性卡通」的动作词汇；这里演示「精密克制 / 电影慢镜 / 流体有机」的高级感原语：
+    E.glide 长减速、字距收拢、focusIn 虚焦显影、defocus 拉焦、wipe 遮罩擦出、sheen 光扫、grain 颗粒、E.exit 加速离场。
+  渲染：node <skill>/scripts/render.mjs shader.html --out out --sub 4 --shutter 180   （子帧运动模糊，高级感人格默认开）
+  预览：浏览器直接打开；空格 暂停/继续，← → 逐帧
+  约定：
+    着色器只读 u_t（秒），不累加、不读上一帧；随机用 hash(坐标)，不用 Math.random
+    canvas 要 preserveDrawingBuffer: true，截图才拿得到画面
+  演示场景只演示原语怎么用，不是合格成片构图。做片时把着色器和 DOM 换成你的概念；色板改 :root。
+  真三维（物体转着看、空间里穿行）用 Three.js：见 references/render.md 第 6 节，同样每帧按 t 设相机再 renderer.render()。
+-->
+<style>
+:root {
+  --W: 1920; --H: 1080;
+  /* 演示色板：深海墨绿 → 骨白。换概念时整组换掉，别沿用 */
+  --c0: #0A1416; --c1: #2D5652; --c2: #B9A68A; --c3: #EFEAE1; --hi: #FFFFFF;
+  --sans: "Inter", "SF Pro Display", -apple-system, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0c0c0c; }
+#stage { position: relative; width: calc(var(--W) * 1px); height: calc(var(--H) * 1px); overflow: hidden;
+  background: var(--c0); color: var(--c3); font-family: var(--sans); transform-origin: 0 0; -webkit-font-smoothing: antialiased; }
+#gl, #grain { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+#grain { mix-blend-mode: overlay; pointer-events: none; z-index: 3; }
+#world { position: absolute; inset: 0; transform-origin: 0 0; z-index: 2; }
+.abs { position: absolute; }
+.label { font: 400 20px/1 var(--mono); letter-spacing: .22em; text-transform: uppercase; color: var(--c2); }
+.title { left: 160px; top: 430px; font-size: 168px; font-weight: 300; line-height: 1; letter-spacing: -.02em; white-space: nowrap; padding: .04em 0 .16em; /* 留出下伸部，background-clip 才不裁字 */
+  background: linear-gradient(100deg, var(--c3) 42%, var(--hi) 50%, var(--c3) 58%) 100% 0 / 300% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sub { left: 166px; top: 640px; font-size: 36px; font-weight: 300; letter-spacing: .02em; color: var(--c2); white-space: nowrap; }
+.rule { left: 166px; top: 380px; width: 72px; height: 2px; background: var(--c2); transform-origin: 0 50%; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="gl"></canvas>
+  <div id="world">
+    <div class="abs label" id="label" style="left:166px; top:150px">Shader · seek(t)</div>
+    <div class="abs rule" id="rule"></div>
+    <h1 class="abs title" id="title">Light moves slow.</h1>
+    <p class="abs sub" id="sub">每一帧都只由时间算出来</p>
+  </div>
+  <canvas id="grain"></canvas>
+</div>
+<script src="lib.js"></script>
+<script>
+/* =================== 1. 着色器（换概念时主要改这里） =================== */
+const FRAG = `#version 300 es
+precision highp float;
+uniform vec2 u_res; uniform float u_t; uniform vec3 u_c0, u_c1, u_c2, u_c3;
+out vec4 o;
+float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float noise(vec2 p) { vec2 i = floor(p), f = fract(p), u = f * f * (3. - 2. * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y); }
+float fbm(vec2 p) { float v = 0., a = .5; mat2 r = mat2(.8, .6, -.6, .8);
+  for (int i = 0; i < 5; i++) { v += a * noise(p); p = r * p * 2.02; a *= .5; } return v; }
+void main() {
+  vec2 uv = (gl_FragCoord.xy - .5 * u_res) / u_res.y;
+  float t = u_t * .1;                                       // 流速：高级感要慢，一秒挪动不到画面 3%
+  vec2 q = vec2(fbm(uv * 1.5 + t), fbm(uv * 1.5 - t + 3.1));          // 域扭曲两层：像墨在水里、丝绸在风里
+  vec2 r = vec2(fbm(uv * 1.5 + 2.2 * q + vec2(1.7, 9.2) + .6 * t), fbm(uv * 1.5 + 2.2 * q + vec2(8.3, 2.8) - .4 * t));
+  float f = fbm(uv * 1.5 + 2.4 * r);
+  vec3 col = mix(u_c0, u_c1, smoothstep(.15, .75, f));
+  col = mix(col, u_c2, .55 * smoothstep(.55, 1., length(r) * f));
+  col += u_c3 * .3 * pow(smoothstep(.55, .95, f), 3.);      // 高光只给最亮的一小撮：光是稀缺的
+  col *= 1. - .45 * dot(uv * .85, uv * .85);                // 暗角
+  o = vec4(col, 1.);
+}`;
+const VERT = `#version 300 es
+in vec2 p; void main() { gl_Position = vec4(p, 0., 1.); }`;
+
+function makeGL(canvas) {
+  canvas.width = W; canvas.height = H;
+  const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true, antialias: false });
+  if (!gl) throw new Error('浏览器不支持 WebGL2');
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error('着色器编译失败：' + gl.getShaderInfoLog(s)); return s; };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, VERT)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FRAG)); gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('着色器链接失败：' + gl.getProgramInfoLog(prog));
+  gl.useProgram(prog);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);  // 一个盖住全屏的大三角形
+  const loc = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const U = (n) => gl.getUniformLocation(prog, n);
+  const rgb = (v) => { const h = ROOT.getPropertyValue(v).trim().replace('#', ''); return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255); };
+  gl.uniform2f(U('u_res'), W, H);
+  ['--c0', '--c1', '--c2', '--c3'].forEach((v, i) => gl.uniform3fv(U('u_c' + i), rgb(v)));
+  return (t) => { gl.uniform1f(U('u_t'), t); gl.drawArrays(gl.TRIANGLES, 0, 3); };
+}
+
+/* =================== 2. 场景（改这里） =================== */
+const DURATION = 6;
+window.DURATION = DURATION;
+const $ = (id) => document.getElementById(id);
+const drawGL = makeGL($('gl'));
+const gctx = (() => { const c = $('grain'); c.width = W; c.height = H; return c.getContext('2d'); })();
+// 时间表：一个镜头只有一件主事件（标题显影），其余都是它的伴奏。高级感 = 少，但每一下都做到位
+const T = { focus: 1.0, title: 1.1, sweep: 2.5, sub: 2.7, out: 4.7 };
+const CAM = [{ t: 0, x: 960, y: 540, s: 1 }, { t: DURATION, x: 980, y: 540, s: 1.035, ease: E.silk }];  // 整段极慢推：电影慢镜允许，但要匀、要小
+
+window.seek = async (t) => {
+  drawGL(t);
+  // 拉焦：标题出来时焦点从背景（z=1）拉到前景（z=0），离场时再拉回去
+  const focus = E.silk(seg(t, T.focus, T.focus + 0.9)) * (1 - E.silk(seg(t, T.out, T.out + 0.9)));
+  $('gl').style.filter = `blur(${defocus(1, 1 - focus, 9)}px)`;
+  cssCamera($('world'), cameraAt(t, CAM));
+
+  const gone = E.exit(seg(t, T.out, T.out + 0.45));            // 加速离场：比进场快一倍，不回头
+  fade($('label'), E.glide(seg(t, 0.2, 1.2)) * (1 - gone), 8);
+  $('rule').style.transform = `scaleX(${E.glide(seg(t, 0.5, 1.6)) * (1 - gone)})`;
+
+  const p = E.glide(seg(t, T.title, T.title + 1.2));
+  focusIn($('title'), p, { blur: 22, scale: 1.04 });
+  $('title').style.letterSpacing = `${lerp(0.18, -0.02, p)}em`;  // 字距从松收紧：精密克制最经典的标题动作
+  if (gone > 0) { $('title').style.opacity = 1 - gone; $('title').style.transform = `translateY(${-60 * gone}px)`; }
+  sheen($('title'), E.silk(seg(t, T.sweep, T.sweep + 0.9)));   // 光扫全片只用这一次
+
+  $('sub').style.clipPath = wipe(E.glide(seg(t, T.sub, T.sub + 0.8)), 'up');
+  $('sub').style.transform = `translateY(${(1 - E.glide(seg(t, T.sub, T.sub + 0.8))) * 18 - 40 * gone}px)`;
+  $('sub').style.opacity = 1 - gone;
+
+  grain(gctx, t, 0.12);
+};
+
+/* =================== 3. 就绪 + 浏览器预览（渲染时不走预览） =================== */
+const RENDER = navigator.webdriver === true || /[?&]render\b/.test(location.search);
+function startPreview() {
+  const st = $('stage');
+  const fit = () => { const k = Math.min(innerWidth / W, innerHeight / H);
+    st.style.transform = `translate(${(innerWidth - W * k) / 2}px,${(innerHeight - H * k) / 2}px) scale(${k})`; };
+  addEventListener('resize', fit); fit();
+  let playing = true, cur = 0, last = performance.now();
+  addEventListener('keydown', (e) => {
+    if (e.code === 'Space') { playing = !playing; e.preventDefault(); }
+    if (e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
+      playing = false; cur = clamp(cur + (e.code === 'ArrowRight' ? 1 : -1) / 30, 0, DURATION); window.seek(cur);
+    }
+  });
+  const loop = (now) => { if (playing) { cur = (cur + Math.max(0, now - last) / 1000) % DURATION; window.seek(cur); } last = now; requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+}
+document.fonts.ready.then(async () => { await window.seek(0); window.ready = true; if (!RENDER) startPreview(); });
+</script>
+</body>
+</html>
